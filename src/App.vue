@@ -4,7 +4,7 @@
     <div class="navbar-cima">
       <div class="container">
         <div class="logo-left">
-          <p>810</p>
+          <p>{{ playerCount}}</p>
         </div>
         <div class="logo-left-subtitle">
           <p>Jogadores Online</p>
@@ -51,36 +51,66 @@
   </div>
    </router-link>
     
-    
+    <router-link to='/equipe/' style="text-decoration: none;"> 
     <div class="dropdown-itens">
       <p style="color: rgb(51, 51, 51);;
   font-weight: normal; font-size: 14px"><q-icon name="chevron_right" style="font-size: 21px;"> </q-icon> Equipe</p>
     </div>
+    </router-link>
+    <a href="/forum/categoria/An%25C3%25BAncios%2520e%2520Novidades/Regras?id=80" style="text-decoration: none;">
     <div class="dropdown-itens">
      <p style="color: rgb(51, 51, 51);;
   font-weight: normal; font-size: 14px"><q-icon name="chevron_right" style="font-size: 21px;"> </q-icon> Regras</p>
     </div>
+    </a>
   </div>
 </div>
 
           </div>
 
           <!-- Item CONTA fixado à direita -->
-          <div class="navbar-conta">
-            <router-link
-              to="/conta"
-              class="navbar-itens"
-              style="text-decoration: none; width: 160px;"
-            >
-              <p>
-                <q-icon
-                  name="person"
-                  style="font-size: 19px; margin-top: -3px; margin-right: 0px; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.25);"
-                />
-                MINHA CONTA
-              </p>
-            </router-link>
-          </div>
+          <!-- Substitua o bloco navbar-conta por este: -->
+<div class="navbar-conta">
+  <div class="navbar-itens conta-hover" style="width: 160px;">
+    <p>
+      <q-icon
+        name="person"
+        style="font-size: 19px; margin-top: -3px; margin-right: 0px; text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.25);"
+      />
+      MINHA CONTA
+      <q-icon name="arrow_drop_down" />
+    </p>
+    <div class="dropdown-content conta-dropdown">
+      <div class="conta-header">
+        <div class="conta-avatar">
+          <q-avatar size="60px" style="border-radius: 10px;">
+            <img :src="userAvatar" alt="Avatar">
+          </q-avatar>
+        </div>
+        <div class="conta-info">
+          <p class="conta-nick" style="color: black; font-weight: normal;">{{ userNick }}</p>
+          <p class="conta-role" style="color: gray; font-weight: normal;">{{ userRole }}</p>
+        </div>
+      </div>
+      <div class="conta-menu">
+        <router-link :to="`/perfil/${userNick}`" class="conta-menu-item">
+  <q-icon name="person" />&nbsp; Perfil
+</router-link>
+
+        <router-link to="/mensagens" class="conta-menu-item">
+          <q-icon name="mail" />&nbsp; Mensagens
+        </router-link>
+        <router-link to="/configuracoes" class="conta-menu-item">
+          <q-icon name="settings" />&nbsp; Configurações
+        </router-link>
+        <br>
+        <div class="conta-menu-item" @click="handleLogout">
+          <q-icon name="logout" />&nbsp; Sair 
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
         </div>
       </div>
     </div>
@@ -93,24 +123,38 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, onBeforeUnmount, computed } from 'vue'
+import { useRouter } from 'vue-router'
+import axios from 'axios'
 
+const router = useRouter()
+
+// Dropdown menu logic
 const dropdownOpen = ref(false)
 const maisBtn = ref(null)
 const maisBtnOffset = ref(0)
 
-function toggleDropdown() {
-  dropdownOpen.value = !dropdownOpen.value
+// Player count logic
+const playerCount = ref('0')
 
-  if (dropdownOpen.value) {
-    nextTick(() => {
-      if (maisBtn.value) {
-        maisBtnOffset.value = maisBtn.value.getBoundingClientRect().left - maisBtn.value.offsetParent.getBoundingClientRect().left
-      }
-    })
-  }
-}
+// User account data
+const userData = ref({
+  username: '',
+  role: 'Visitante',
+  avatar: '',
+  created_at: new Date().toISOString()
+})
 
+// Computed properties for user data
+const userNick = computed(() => userData.value.username || 'Visitante')
+const userRole = computed(() => userData.value.role)
+const userAvatar = computed(() => userData.value.avatar || 'https://mc-heads.net/avatar/Steve')
+const accountCreated = computed(() => {
+  const date = new Date(userData.value.created_at)
+  return date.toLocaleDateString('pt-BR')
+})
+
+// Navbar items
 const navbarItens = [
   { label: 'INÍCIO', link: '/' },
   { label: 'LOJA', link: '/loja', icon: 'star' },
@@ -120,15 +164,158 @@ const navbarItens = [
   { label: 'MAIS', link: '/mais', dropdown: true },
   { label: 'CONTA', link: '/conta' }
 ]
+
+let intervalId = null
+
+// Toggle dropdown function
+function toggleDropdown() {
+  dropdownOpen.value = !dropdownOpen.value
+  if (dropdownOpen.value) {
+    nextTick(() => {
+      if (maisBtn.value) {
+        maisBtnOffset.value = maisBtn.value.getBoundingClientRect().left - maisBtn.value.offsetParent.getBoundingClientRect().left
+      }
+    })
+  }
+}
+
+// Fetch player count function
+const fetchPlayerCount = async () => {
+  try {
+    const response = await axios.get('https://api.mcsrvstat.us/2/hylex.net')
+    
+    if (response.data?.players?.online !== undefined) {
+      playerCount.value = response.data.players.online.toLocaleString()
+    } else {
+      playerCount.value = 'Erro'
+    }
+  } catch (error) {
+    console.error('Erro ao buscar jogadores online:', error)
+    playerCount.value = 'Erro'
+    setTimeout(fetchPlayerCount, 30000)
+  }
+}
+
+// Load user data from localStorage
+const loadUserData = () => {
+  const storedUser = localStorage.getItem('user')
+  if (storedUser) {
+    try {
+      const parsedUser = JSON.parse(storedUser)
+      userData.value = {
+        username: parsedUser.username || '',
+        role: parsedUser.role || 'Membro',
+        avatar: parsedUser.avatar || `https://mc-heads.net/avatar/${parsedUser.username || 'Steve'}`,
+        created_at: parsedUser.created_at || new Date().toISOString()
+      }
+    } catch (e) {
+      console.error('Erro ao carregar dados do usuário:', e)
+    }
+  }
+}
+
+// Handle logout
+const handleLogout = () => {
+  localStorage.removeItem('authToken')
+  localStorage.removeItem('user')
+  userData.value = {
+    username: '',
+    role: 'Visitante',
+    avatar: '',
+    created_at: new Date().toISOString()
+  }
+  router.push('/login')
+}
+
+onMounted(() => {
+  fetchPlayerCount()
+  intervalId = setInterval(fetchPlayerCount, 60000)
+  loadUserData()
+})
+
+onBeforeUnmount(() => {
+  if (intervalId) clearInterval(intervalId)
+})
 </script>
-
-
 <style>
 
 .mais-hover {
   position: relative;
 }
+/* Adicione ao final do seu <style> */
+.conta-hover {
+  position: relative;
+}
 
+.conta-hover .conta-dropdown {
+  display: none;
+  position: absolute;
+  top: 61px;
+  right: 0;
+  width: 220px;
+}
+
+.conta-hover:hover .conta-dropdown {
+  display: block;
+}
+
+.conta-header {
+  padding: 15px;
+  display: flex;
+  align-items: center;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.conta-avatar {
+  margin-right: 15px;
+}
+
+.conta-info {
+  flex-grow: 1;
+}
+
+.conta-nick {
+  font-weight: bold;
+  margin: 0;
+  color: #333;
+  font-size: 16px;
+}
+
+.conta-role {
+  margin: 0;
+  color: #6c757d;
+  font-size: 14px;
+}
+
+.conta-menu {
+  padding: 1em 0;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  line-height: 10px;
+
+}
+
+.conta-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 20px;
+  color: gray;
+  text-align: center;
+  text-decoration: none;
+  font-size: 16px;
+  transition: background-color 0.2s;
+}
+
+.conta-menu-item:hover {
+  background-color: #f8f9fa;
+}
+
+.conta-menu-item q-icon {
+  margin-right: 10px;
+  font-size: 18px;
+}
 .mais-hover .dropdown-content {
   display: none;
   position: absolute;

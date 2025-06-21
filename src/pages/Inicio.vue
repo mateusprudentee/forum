@@ -115,6 +115,51 @@ Hoje, estamos introduzindo dois novos sistemas independentes: a possibilidade de
     </div>
     
   </div>
+  <div class="topicos-anuncios">
+  <div class="ultimo-topico">
+
+    <div class="header-topico">
+      <div class="flex" style="display: flex;
+  gap: 15px;">
+      <div class="skin-logo"></div>
+
+      <div class="header-postado">
+        <p>Postado por Azalim</p>
+        <div class="header-data">
+        <p>14 de Jan. 2021</p>
+      </div>
+      </div>
+      </div>
+
+    </div>
+     <div class="header-faixa">
+        <div class="header-faixa-badge">
+          <p style="text-transform: uppercase;">DESTAQUE</p>
+           <div class="header-faixa-title">
+          <p>Comando /celular e Partidas Prime</p>
+        </div>
+        </div>
+      </div>
+
+      <div class="conteudo-topico">
+        <p>Olá meus queridos,
+<br>
+<br>
+Sabemos que hackers são um problema. Sempre foram e, provavelmente, sempre serão. Estamos sempre buscando realizar melhorias em nosso anticheat, contudo, a forma como o Minecraft foi concebido, lá em 2010, dificulta muito a criação de mecanismos eficazes contra modificações no cliente do jogo. Por isso, é preciso trabalhar também em caminhos alternativas para combater e desincentivar o uso de hack.
+<br>
+<br>
+Hoje, estamos introduzindo dois novos sistemas independentes: a possibilidade de vincular um número de celular à sua conta e a divisão das partidas de minigame entre Prime e comum. Eles funcionarão juntos com o objetivo de reduzir o número de hackers que você encontra nas partidas de minigame.
+</p>
+<div class="continuar-lendo">
+ <a class="btn btn-primary" href="threads/comando-celular-e-partidas-prime.669674/">
+                    Continuar lendo
+                </a>
+                </div>
+      </div>
+               
+    </div>
+    
+  </div>
 </template>
 <style scoped>
 .ultimas-novidades-list {

@@ -3,6 +3,8 @@ import bodyParser from "body-parser";
 import cors from "cors";
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken';
 
 // Importação alternativa para sqlite3
 const sqlite3 = (await import('sqlite3')).default;
@@ -13,6 +15,9 @@ const __dirname = dirname(__filename);
 
 const app = express();
 const port = 3001;
+
+// Configurações de segurança
+const SECRET_KEY = '8448270f4a7672db1af3d41cefc127909b735edad27c8b1b8d4fa6145c27dbaa';
 
 // Configurações básicas
 app.use(cors());
@@ -29,6 +34,19 @@ const db = new Database("./forum.db", (err) => {
   }
 });
 
+// Middleware de autenticação
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) return res.sendStatus(401);
+
+  jwt.verify(token, SECRET_KEY, (err, user) => {
+    if (err) return res.sendStatus(403);
+    req.user = user;
+    next();
+  });
+}
 
 // Inicializar o banco de dados
 function initializeDatabase() {
@@ -43,6 +61,28 @@ function initializeDatabase() {
         data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
+
+    db.run(`CREATE TABLE IF NOT EXISTS membros (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      role TEXT DEFAULT 'membro',
+      avatar TEXT DEFAULT 'default_avatar.png',
+      data_criacao TEXT DEFAULT CURRENT_TIMESTAMP,
+      visualizando_em TEXT DEFAULT '',
+      assinatura TEXT DEFAULT '',
+      ultima_resposta_topico TEXT DEFAULT '',
+      seguidores INTEGER DEFAULT 0,
+      seguindo INTEGER DEFAULT 0,
+      curtidas INTEGER DEFAULT 0,
+      trofeus INTEGER DEFAULT 0,
+      postagens INTEGER DEFAULT 0,
+      alertas INTEGER DEFAULT 0,
+      team_members TEXT DEFAULT 'nao',
+      minecraft_nick TEXT,
+      last_login TEXT
+    )`);
 
     // Tabela de conteúdo dos tópicos
     db.run(`
@@ -81,18 +121,17 @@ function initializeDatabase() {
       )
     `);
 
-// Adicione isso na função initializeDatabase()
-db.run(`
-  CREATE TABLE IF NOT EXISTS topic_replies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    topic_id INTEGER NOT NULL,
-    author TEXT NOT NULL,
-    avatar TEXT NOT NULL,  
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (topic_id) REFERENCES recent_topics(id) ON DELETE CASCADE
-  )
-`);
+    db.run(`
+      CREATE TABLE IF NOT EXISTS topic_replies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        topic_id INTEGER NOT NULL,
+        author TEXT NOT NULL,
+        avatar TEXT NOT NULL,  
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (topic_id) REFERENCES recent_topics(id) ON DELETE CASCADE
+      )
+    `);
 
     // Tabela de estatísticas
     db.run(`
@@ -134,8 +173,74 @@ db.run(`
     `);
 
 
-    // Inserir dados iniciais
-    insertInitialData();
+
+    db.run(`INSERT OR IGNORE INTO forum_stats (posts, members, guests) VALUES (0, 0, 0)`);
+  });
+}
+
+async function registerUser(userData) {
+  const hashedPassword = await bcrypt.hash(userData.password, 10);
+  
+  // Gerar URL do avatar usando o minecraftNick ou username como fallback
+  const minecraftNick = userData.minecraftNick || userData.username;
+  const avatarUrl = `https://cravatar.eu/helmavatar/${encodeURIComponent(minecraftNick)}/190.png`;
+  
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO membros 
+       (username, email, password, minecraft_nick, avatar, data_criacao) 
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+      [
+        userData.username,
+        userData.email,
+        hashedPassword,
+        userData.minecraftNick,
+        avatarUrl, // Incluindo a URL do avatar
+      ],
+      function(err) {
+        if (err) reject(err);
+        else resolve(this.lastID);
+      }
+    );
+  });
+}
+async function loginUser(username, password) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT * FROM membros WHERE username = ? OR email = ?`,
+      [username, username],
+      async (err, user) => {
+        if (err) return reject(err);
+        if (!user) return reject(new Error('Usuário não encontrado'));
+        
+        const isValid = await bcrypt.compare(password, user.password);
+        if (!isValid) return reject(new Error('Senha incorreta'));
+        
+        // Atualizar último login
+        db.run(
+          `UPDATE membros SET last_login = datetime('now') WHERE id = ?`,
+          [user.id]
+        );
+        
+        // Gerar token JWT
+        const token = jwt.sign(
+          { id: user.id, username: user.username, role: user.role },
+          SECRET_KEY,
+          { expiresIn: '24h' }
+        );
+        
+        resolve({ user, token });
+      }
+    );
+  });
+}
+
+function getUserById(id) {
+  return new Promise((resolve, reject) => {
+    db.get(`SELECT * FROM membros WHERE id = ?`, [id], (err, user) => {
+      if (err) reject(err);
+      else resolve(user);
+    });
   });
 }
 
@@ -659,18 +764,190 @@ app.get("/api/forum/recent-topics", (req, res) => {
   });
 });
 
-// Obter estatísticas do fórum
-app.get("/api/forum/stats", (req, res) => {
-  db.get("SELECT posts, members, guests FROM forum_stats ORDER BY updated_at DESC LIMIT 1", (err, row) => {
+
+
+
+// MEMBROS
+app.get("/api/members", (req, res) => {
+  const { username } = req.query;
+  
+  let query = "SELECT * FROM membros";
+  const params = [];
+  
+  if (username) {
+    query += " WHERE username = ?";
+    params.push(username);
+  }
+
+  db.all(query, params, (err, rows) => {
     if (err) {
-      res.status(500).json({ error: err.message });
-      return;
+      console.error('Erro ao buscar membros:', err);
+      return res.status(500).json({ error: 'Erro interno no servidor' });
     }
-    res.json(row || { posts: 0, members: 0, guests: 0 });
+    
+    if (username) {
+      // Retorna apenas o primeiro resultado quando filtrando por username
+      res.json(rows.length > 0 ? rows[0] : null);
+    } else {
+      // Retorna todos os membros quando não há filtro
+      res.json(rows);
+    }
+  });
+});
+// Updated API endpoint with better error handling
+app.get("/api/members/:username", async (req, res) => {
+  try {
+    const username = req.params.username;
+    
+    // Validate username exists
+    if (!username || username.trim() === '') {
+      return res.status(400).json({ error: 'Username é obrigatório' });
+    }
+
+    const sql = "SELECT * FROM membros WHERE username = ?";
+    const params = [username];
+    
+    // Using promise-based query
+    const member = await new Promise((resolve, reject) => {
+      db.get(sql, params, (err, row) => {
+        if (err) {
+          console.error('Database error:', err);
+          return reject(err);
+        }
+        resolve(row || null);
+      });
+    });
+
+    if (!member) {
+      return res.status(404).json({ error: 'Membro não encontrado' });
+    }
+
+    res.json(member);
+    
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ 
+      error: 'Erro interno no servidor',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+  }
+});
+// API para obter o total de membros registrados
+app.get("/api/members/stats/total", (req, res) => {
+  const query = "SELECT COUNT(id) as total_members FROM membros";
+  
+  db.get(query, [], (err, row) => {
+    if (err) {
+      console.error('Erro ao contar membros:', err);
+      return res.status(500).json({ error: 'Erro interno no servidor' });
+    }
+    
+    res.json({
+      total_members: row.total_members || 0
+    });
+  });
+});
+// API para obter membros online (considerando login nos últimos 15 minutos)
+app.get("/api/members/online", (req, res) => {
+  const onlineThreshold = new Date(Date.now() - 15 * 60 * 1000).toISOString(); // 15 minutos atrás
+  
+  const query = `
+    SELECT 
+      COUNT(id) as online_count,
+      (SELECT COUNT(id) FROM membros) as total_members
+    FROM membros 
+    WHERE last_login > ?
+  `;
+  
+  db.get(query, [onlineThreshold], (err, row) => {
+    if (err) {
+      console.error('Erro ao buscar membros online:', err);
+      return res.status(500).json({ 
+        error: 'Erro interno no servidor',
+        // Dados mockados em caso de falha
+        online_count: 0,
+        total_members: 0
+      });
+    }
+    
+    res.json({
+      online_members: row.online_count || 0,
+      total_members: row.total_members || 0,
+      last_updated: new Date().toISOString()
+    });
+  });
+});
+// API detalhada de membros online com informações básicas
+app.get("/api/members/online/list", (req, res) => {
+  const onlineThreshold = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+  
+  const query = `
+    SELECT 
+      id, username, avatar, role, 
+      last_login, minecraft_nick
+    FROM membros 
+    WHERE last_login > ?
+    ORDER BY username ASC
+  `;
+  
+  db.all(query, [onlineThreshold], (err, rows) => {
+    if (err) {
+      console.error('Erro ao listar membros online:', err);
+      return res.status(500).json({ 
+        error: 'Erro interno no servidor',
+        members: []
+      });
+    }
+    
+    // Consulta para estatísticas totais
+    db.get("SELECT COUNT(id) as total FROM membros", [], (err, countRow) => {
+      const totalMembers = countRow?.total || 0;
+      
+      res.json({
+        members: rows || [],
+        online_count: rows.length,
+        total_members: totalMembers,
+        last_updated: new Date().toISOString()
+      });
+    });
   });
 });
 
-// Obter tópicos por categoria
+
+
+
+
+// Obter estatísticas do fórum
+app.get("/api/forum/stats", (req, res) => {
+  const query = `
+    SELECT 
+      (SELECT COUNT(*) FROM recent_topics) as topics,
+      (SELECT COUNT(*) FROM recent_topics) + 
+      (SELECT COALESCE(SUM(replies), 0) FROM (
+        SELECT COUNT(*) as replies FROM topic_replies GROUP BY topic_id
+      )) as posts,
+      0 as members
+  `;
+
+  db.get(query, (err, row) => {
+    if (err) {
+      console.error('Erro ao buscar estatísticas do fórum:', err);
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    // Garante que sempre retornamos valores numéricos
+    const stats = {
+      topics: row?.topics || 0,
+      posts: row?.posts || 0,
+      members: 0 // Fixo em 0 como solicitado
+    };
+    
+    res.json(stats);
+  });
+});
+
+// Obter tópicos por categoria - Atualizado para incluir fixado e trancado
 app.get("/api/forum/topics/:category", (req, res) => {
   const { category } = req.params;
   
@@ -681,6 +958,8 @@ app.get("/api/forum/topics/:category", (req, res) => {
       rt.title,
       rt.category,
       rt.views,
+      rt.fixado,
+      rt.trancado,
       COUNT(tr.id) as replies,
       MAX(tr.created_at) as last_reply_time,
       (
@@ -696,7 +975,7 @@ app.get("/api/forum/topics/:category", (req, res) => {
     LEFT JOIN topic_replies tr ON tr.topic_id = rt.id
     WHERE rt.category = ?
     GROUP BY rt.id
-    ORDER BY rt.created_at DESC`, 
+    ORDER BY rt.fixado DESC, rt.created_at DESC`, 
     [category],
     (err, rows) => {
       if (err) {
@@ -717,8 +996,29 @@ app.get("/api/forum/topics/:category", (req, res) => {
     }
   );
 });
+// Adicione esta nova rota à sua API:
+app.delete("/api/forum/delete/reply/:id", (req, res) => {
+  const { id } = req.params;
 
-// Obter detalhes de um tópico específico por ID
+  db.run(
+    `DELETE FROM topic_replies WHERE id = ?`,
+    [id],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      
+      if (this.changes === 0) {
+        return res.status(404).json({ error: "Mensagem não encontrada" });
+      }
+      
+      res.json({ success: true });
+    }
+  );
+});
+
+
+// Obter detalhes de um tópico específico por ID - Atualizado para incluir trancado
 app.get("/api/forum/topic/:id", (req, res) => {
     const { id } = req.params;
     
@@ -730,6 +1030,7 @@ app.get("/api/forum/topic/:id", (req, res) => {
         rt.category as categoria,
         rt.views as visualizacoes,
         rt.created_at,
+        rt.trancado,
         tm.name as autor,
         tm.role as autor_cargo,
         (SELECT COUNT(*) FROM topic_replies WHERE topic_id = rt.id) as respostas,
@@ -763,12 +1064,43 @@ app.get("/api/forum/topic/:id", (req, res) => {
         content: row.conteudo || 'Conteúdo não disponível',
         posts_autor: row.posts_autor || 0,
         criado_em: row.created_at,
+        trancado: row.trancado || 'não',
         link: `boom.me/${row.titulo.toLowerCase().replace(/\s+/g, '-')}`
       };
       
       res.json(response);
     });
   });
+  // Adicione esta nova rota à sua API:
+app.put("/api/forum/topic/:id/lock", (req, res) => {
+  const { id } = req.params;
+  const { trancado } = req.body;
+
+  if (!['sim', 'não'].includes(trancado)) {
+    return res.status(400).json({ error: "Status inválido" });
+  }
+
+  db.run(
+    `UPDATE recent_topics SET trancado = ? WHERE id = ?`,
+    [trancado, id],
+    function(err) {
+      if (err) {
+        return res.status(500).json({ error: err.message });
+      }
+      
+      if (this.changes === 0) {
+        return res.status(404).json({ error: "Tópico não encontrado" });
+      }
+      
+      res.json({ 
+        success: true,
+        trancado 
+      });
+    }
+  );
+});
+
+
 // Registrar visualização de tópico
 app.post('/api/forum/topic/:id/view', (req, res) => {
   const { id } = req.params;
@@ -785,21 +1117,18 @@ app.post('/api/forum/topic/:id/view', (req, res) => {
     }
   );
 });
-// Criar um novo tópico (versão simplificada)
-// Criar um novo tópico (versão corrigida)
+
+
+// Criar um novo tópico ()
 app.post("/api/forum/topics", (req, res) => {
   const { title, category, content } = req.body;
-  
-  // Validação básica
+
   if (!title || !category || !content) {
     return res.status(400).json({ error: "Título, categoria e conteúdo são obrigatórios" });
   }
-
-  // Simular um avatar (substitua por lógica real de autenticação)
-  const avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent('Usuário')}&background=random`;
+  const avatar = `https://cravatar.eu/helmavatar/yBlokzin/190.png`;
 
   db.serialize(() => {
-    // Primeiro, inserir o tópico na tabela recent_topics
     db.run(
       "INSERT INTO recent_topics (avatar, title, category) VALUES (?, ?, ?)",
       [avatar, title, category],
@@ -811,7 +1140,6 @@ app.post("/api/forum/topics", (req, res) => {
         
         const topicId = this.lastID;
         
-        // Depois, inserir o conteúdo na tabela topic_content
         db.run(
           "INSERT INTO topic_content (topic_id, content) VALUES (?, ?)",
           [topicId, content],
@@ -848,6 +1176,7 @@ app.post("/api/forum/topics", (req, res) => {
     );
   });
 });
+
 // Obter respostas de um tópico
 app.get("/api/forum/topic/:id/replies", (req, res) => {
   const { id } = req.params;
@@ -932,7 +1261,252 @@ app.post("/api/forum/topic/:id/reply", async (req, res) => {
     });
   }
 });
+
+// Deletar um tópico
+app.delete('/api/forum/delete/topic/:id', (req, res) => {
+  const { id } = req.params;
+
+  // Primeiro verificar se o tópico existe
+  db.get('SELECT id FROM recent_topics WHERE id = ?', [id], (err, row) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    if (!row) {
+      return res.status(404).json({ error: 'Tópico não encontrado' });
+    }
+
+    // Iniciar transação para garantir consistência
+    db.serialize(() => {
+      // 1. Deletar as respostas associadas ao tópico
+      db.run('DELETE FROM topic_replies WHERE topic_id = ?', [id], function(err) {
+        if (err) {
+          return res.status(500).json({ error: err.message });
+        }
+
+        // 2. Deletar o conteúdo do tópico
+        db.run('DELETE FROM topic_content WHERE topic_id = ?', [id], function(err) {
+          if (err) {
+            return res.status(500).json({ error: err.message });
+          }
+
+          // 3. Finalmente deletar o tópico
+          db.run('DELETE FROM recent_topics WHERE id = ?', [id], function(err) {
+            if (err) {
+              return res.status(500).json({ error: err.message });
+            }
+
+            // Atualizar estatísticas do fórum
+            db.run(
+              'UPDATE forum_stats SET posts = (SELECT COUNT(*) FROM topic_replies) + (SELECT COUNT(*) FROM recent_topics)',
+              function(err) {
+                if (err) {
+                  console.error('Erro ao atualizar estatísticas:', err);
+                }
+
+                res.json({ 
+                  success: true,
+                  message: 'Tópico e conteúdo associado deletados com sucesso',
+                  changes: this.changes
+                });
+              }
+            );
+          });
+        });
+      });
+    });
+  });
+});
+
+
+
+
+// Rota para obter tópicos destacados
+app.get("/api/forum/topics/featured", (req, res) => {
+  const { limit } = req.query;
+  
+  const query = `
+    SELECT 
+      rt.id,
+      rt.avatar,
+      rt.title,
+      rt.category,
+      rt.views,
+      rt.featured,
+      COUNT(tr.id) as replies,
+      MAX(tr.created_at) as last_reply_time,
+      (
+        SELECT tr.author 
+        FROM topic_replies tr 
+        WHERE tr.topic_id = rt.id 
+        ORDER BY tr.created_at DESC 
+        LIMIT 1
+      ) as last_reply_user,
+      rt.created_at,
+      tc.content
+    FROM recent_topics rt
+    LEFT JOIN topic_replies tr ON tr.topic_id = rt.id
+    LEFT JOIN topic_content tc ON tc.topic_id = rt.id
+    WHERE rt.featured = 1
+    GROUP BY rt.id
+    ORDER BY 
+      CASE 
+        WHEN rt.featured = 1 THEN 0  -- Tópicos destacados primeiro
+        ELSE 1
+      END,
+      (rt.views * 0.5 + COUNT(tr.id) * 0.5) DESC,  -- Ordem por popularidade
+      rt.created_at DESC  -- Ordem por data mais recente
+    ${limit ? 'LIMIT ?' : ''}
+  `;
+  
+  db.all(query, limit ? [parseInt(limit)] : [], (err, rows) => {
+    if (err) {
+      res.status(500).json({ error: err.message });
+      return;
+    }
+    
+    const topics = rows.map(topic => ({
+      id: topic.id,
+      avatar: topic.avatar,
+      title: topic.title,
+      category: topic.category,
+      views: topic.views || 0,
+      replies: topic.replies || 0,
+      last_reply_time: topic.last_reply_time || null,
+      last_reply_user: topic.last_reply_user || null,
+      created_at: topic.created_at,
+      featured: topic.featured || 0,
+      excerpt: topic.content 
+        ? topic.content.replace(/<[^>]*>/g, '').substring(0, 200) + '...' 
+        : 'Sem conteúdo'
+    }));
+    
+    res.json(topics);
+  });
+});
+
+// Rotas de autenticação
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { username, email, password, minecraftNick, avatar } = req.body;
+    
+    if (!username || !email || !password || !minecraftNick) {
+      return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
+    }
+
+    // Gera a URL do avatar se não foi enviada
+    const avatarUrl = avatar || `https://cravatar.eu/helmavatar/${encodeURIComponent(username)}/190.png`;
+    
+    const userId = await registerUser({
+      username,
+      email,
+      password,
+      minecraftNick,
+      avatar: avatarUrl // Usa a URL gerada
+    });
+    
+    res.status(201).json({ 
+      success: true,
+      message: 'Usuário registrado com sucesso',
+      userId,
+      user: {
+        username,
+        email,
+        minecraftNick,
+        avatar: avatarUrl,
+        created_at: new Date()
+      }
+    });
+  } catch (error) {
+    console.error('Erro no registro:', error);
+    res.status(400).json({ 
+      error: error.message.includes('UNIQUE') ? 
+        'Nome de usuário ou email já existe' : 
+        'Erro ao registrar usuário' 
+    });
+  }
+});
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Nome de usuário e senha são obrigatórios' });
+    }
+    
+    const { user, token } = await loginUser(username, password);
+    
+    // Remover senha antes de enviar
+    delete user.password;
+    
+    res.json({
+      success: true,
+      message: 'Login bem-sucedido',
+      token,
+      user
+    });
+  } catch (error) {
+    console.error('Erro no login:', error);
+    res.status(401).json({ error: error.message });
+  }
+});
+
+// Rota protegida - exemplo
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await getUserById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+    
+    delete user.password;
+    res.json(user);
+  } catch (error) {
+    console.error('Erro ao buscar usuário:', error);
+    res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+});
+
 // Iniciar o servidor
 app.listen(port, () => {
   console.log(`Servidor rodando em http://localhost:${port}`);
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+static async getMe(req, res) {
+  try {
+    const user = await Member.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Usuário não encontrado' 
+      });
+    }
+    
+    const { password: _, ...userData } = user;
+    
+    res.json({
+      success: true,
+      user: {
+        ...userData,
+        nickname: user.minecraftNick || user.username
+      }
+    });
+
+  } catch (error) {
+    console.error('Erro ao buscar perfil:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Erro interno no servidor' 
+    });
+  }
+}

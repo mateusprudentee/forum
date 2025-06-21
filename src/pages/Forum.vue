@@ -18,41 +18,63 @@
       </div>
       <div class="topicos-recentes-usuarios">
         <div v-for="(topico, index) in recentTopics" :key="index" class="topico-usuario">
+         <router-link
+            :to="{
+              name: 'ForumTopic',
+              params: {
+                category: topico.category,
+                topic: topico.title,
+              },
+              query: {
+                id: topico.id
+              }
+            }"
+            style="text-decoration: none; color: inherit;"
+          >
           <div class="flex">
             <div class="topico-img">
               <img :src="topico.avatar" width="60" height="60" style="border-radius: 10px;">
             </div>
+            
             <div class="topico-usuario-title">
               <p>{{ topico.title }}</p>
               <div class="topico-usuario-info">
                 <p>
                   Por
-                  <a style="color: black;">{{ topico.autor || 'Anônimo' }}</a>,
+                  <a style="color: black;">{{ topico.author || 'Anônimo' }}</a>,
                   <a style="color: black;">{{ formatDate(topico.created_at) }}</a>,
                   em
                   <a style="color: black;">{{ topico.category }}</a>
                 </p>
               </div>
+              
               <div class="flex" style="margin-top: -17px; font-size: 14px;">
                 <div class="topico-usuario-repostas">
                   <q-icon name="chat"></q-icon> {{ topico.replies || 0 }} respostas
                 </div>
+                
                 <div class="topico-usuario-view">
                   <q-icon name="visibility"></q-icon> {{ topico.views || 0 }} visualizações
                 </div>
+                
               </div>
+              
             </div>
+            
             <div class="ultimo-container">
               <div class="ultima-resposta">
                 <p>Última resposta</p>
                 <div class="ultima-resposta-nick">
-                  <p>{{ topico.last_reply_user || 'Nenhuma' }}</p>
-                </div>
+  <p>{{ topico.last_reply_user || 'Nenhuma' }}, {{ formatDate(topico.last_reply_date || topico.created_at) }}</p>
+</div>
               </div>
             </div>
           </div>
+</router-link>
         </div>
+        
       </div>
+      
     </div>
     
 
@@ -73,29 +95,84 @@
       </div>
       
       
-      <div class="equipe-card" style="margin-top: 20px;">
-        <div class="equipe-container">
-          <div class="equipe">
-            <p>Membros da equipe online</p>
+    <div class="equipe-card" style="margin-top: 20px;">
+    <div class="equipe-container">
+      <div class="equipe">
+        <p>Membros da equipe online</p>
+      </div>
+     <div v-for="(member, index) in teamMembers" :key="'member-'+index" 
+     class="equipe-tipo" 
+     @click="handleClick(member)"
+     style="margin-top: 3px;">
+        <div class="flex">
+          <div class="skin" style="margin-top: 5px;">
+            <img :src="member.avatar" width="50" height="50" alt="[IMG]" style="border-radius: 10px; margin-top: -6px;">
           </div>
-          <div v-for="(member, index) in teamMembers" :key="'member-'+index" class="equipe-tipo" @click="openStaffDetails(member)">
-            <div class="flex">
-              <div class="skin" style="margin-top: 5px;">
-                <img :src="member.avatar" width="40" height="40" alt="[IMG]" style="border-radius: 10px;">
-              </div>
-              <div class="equipe-title" :style="{ color: getRoleColor(member.role) }" style="font-weight: normal;">
-                <p>{{ member.name }}</p>
-                <div class="equipe-titulo">
-                  <p>{{ member.role }}</p>
-                </div>
-              </div>
-             
+          <div class="equipe-title" :style="{ color: getRoleColor(member.role) }" style="font-weight: normal;">
+            <p>{{ member.name }}</p>
+            <div class="equipe-titulo">
+              <p>{{ member.role }}</p>
             </div>
           </div>
         </div>
       </div>
+    
+
+  <!-- Diálogo ViewStaff -->
+  <ViewStaff 
+    v-if="staffDialog" 
+    :staff="selectedStaff" 
+    @close="closeStaffDialog"
+  />
+  </div>
+  </div>
+
+ <div class="equipe-card" style="margin-top: 20px;">
+  <div class="equipe-container">
+    <div class="equipe">
+      <p>Membros online</p>
+    </div>
+    <div class="flex">
+      <div class="equipe-title-dois" style="font-weight: normal;">
+        <p>{{ onlineMembersFormatted }}</p>
+        <p style="margin-top: -10px; color: gray">
+          Total: {{ totalMembers }} ({{ onlineCount }} membros{{ visitorsCount > 0 ? ' e ' + visitorsCount + ' visitantes' : '' }})        
+        </p>
+      </div>
     </div>
   </div>
+</div>
+
+  <div class="equipe-card" style="margin-top: 20px;">
+    <div class="equipe-container">
+      <div class="equipe">
+        <p>Fórum</p>
+      </div>
+        <div class="flex">
+        <div class="user-info">
+              <div class="orientacao-estatistica">
+                <div class="orientacao-left">
+                  <p>Tópicos</p>
+                  <p>Postagens</p>
+                  <p>Membros</p>
+                </div>
+                <div class="orientacao-left-left">
+                  <p>{{ stats.topics || 0}}</p>
+                  <p>{{ stats.posts || 0 }}</p>
+                  <p>{{  stats.members || 0 }}</p>
+                </div>
+              </div>
+           
+          </div>
+          
+      </div>
+    
+
+  </div>
+  </div>
+  </div>
+  </div>
+   
       
   
   <div class="flex" style="margin-top: 20px;">
@@ -147,17 +224,28 @@ export default {
   setup() {
     return {
       staffDialog: ref(false),
-      selectedStaff: ref(null)
+      onlineMembers: [],
+      onlineCount: 0,
+      totalMembers: 0,
+      selectedStaff: ref(null),
+      hoverTimer: ref(null),
+      dialogOpenedByClick: ref(false) // Nova flag para controlar abertura por clique
     }
   },
   data() {
     return {
+      stats: {
+        topics: 0,
+        posts: 0,
+        members: 0
+      },
+
       loading: true,
       teamMembers: [],
       recentTopics: [],
       mainForums: [],      
       teamForums: [],  
-      categoryGroups: [], // Inicializado vazio, será preenchido pela API
+      categoryGroups: [],
       stats: {
         posts: 0,
         members: 0,
@@ -168,22 +256,202 @@ export default {
   },
   created() {
     this.loadData();
+    this.startOnlineMembersAutoRefresh();
   },
-  methods: {
-    openStaffDetails(member) {
-      this.selectedStaff = member;
-      this.staffDialog = true;
+
+
+ 
+  computed: {
+    // Computed para formatar os nomes dos membros online
+    onlineMembersFormatted() {
+      return this.onlineMembers.length > 0
+        ? this.onlineMembers.join(', ')
+        : 'Nenhum membro online'
     },
+
+    visitorsCount() {
+      return this.totalMembers - this.onlineCount
+    },
+
+    // Se você já tem outros computeds, mantenha eles
+  },
+
+  created() {
+    this.loadData();
+    this.fetchOnlineMembers();  // chama a busca quando o componente carrega
+  },
+
+  methods: {
+   async fetchOnlineMembers() {
+  try {
+    const res = await fetch('http://localhost:3001/api/members/online');
+    if (!res.ok) throw new Error('Erro ao carregar membros online');
+
+    const data = await res.json();
+
+    this.onlineMembers = data.online_members || [];
+    this.onlineCount = data.online_count || 0;
+    this.totalMembers = data.total_members || 0;
+    this.visitorsCount = 0; // Você precisará implementar isso na API se quiser mostrar visitantes
+    
+    // Formatar a lista de membros
+    this.onlineMembersFormatted = this.onlineMembers.length > 0 
+      ? this.onlineMembers.join(', ') 
+      : 'Nenhum membro online no momento';
+  } catch (error) {
+    console.error('Erro ao buscar membros online:', error);
+    this.onlineMembers = [];
+    this.onlineCount = 0;
+    this.totalMembers = 0;
+    this.onlineMembersFormatted = 'Não foi possível carregar os membros online';
+  }
+},
+
+    // você pode querer atualizar periodicamente (opcional)
+    startOnlineMembersAutoRefresh() {
+      this.onlineInterval = setInterval(() => {
+        this.fetchOnlineMembers();
+      }, 60000); // a cada 60 segundos
+    },
+
+    stopOnlineMembersAutoRefresh() {
+      clearInterval(this.onlineInterval);
+    },
+
+    async loadStats() {
+      try {
+        const res = await fetch('/api/forum/stats');
+        if (!res.ok) throw new Error('Erro ao carregar estatísticas');
+        this.stats = await res.json();
+      } catch (error) {
+        console.error('Erro ao carregar estatísticas:', error);
+        this.stats = { topics: 0, posts: 0, members: 0 };
+      }
+    },
+    
+    async loadCategoryStats() {
+      try {
+        for (const group of this.categoryGroups) {
+          for (const category of group.categories) {
+            const res = await fetch(`http://localhost:3001/api/forum/category-stats/${encodeURIComponent(category.name)}`);
+            if (res.ok) {
+              const stats = await res.json();
+              category.posts = stats.posts || 0;
+              category.topics = stats.topics || 0;
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Erro ao carregar estatísticas por categoria:', error);
+      }
+    },
+    handleMouseEnter(member) {
+      if (this.dialogOpenedByClick) return; // Não faz nada se já foi aberto por clique
+      
+      if (this.hoverTimer) {
+        clearTimeout(this.hoverTimer);
+      }
+      
+      this.hoverTimer = setTimeout(() => {
+        this.openStaffDialog(member);
+      }, 500);
+    },
+    
+    handleMouseLeave() {
+      if (this.dialogOpenedByClick) return; // Não faz nada se foi aberto por clique
+      
+      if (this.hoverTimer) {
+        clearTimeout(this.hoverTimer);
+      }
+      
+      if (this.staffDialog && !this.dialogOpenedByClick) {
+        this.closeStaffDialog();
+      }
+    },
+    
+   // Corrigindo a função handleClick
+async handleClick(member) {
+  try {
+    console.log('Dados do membro clicado:', member);
+    
+    // Garante que temos pelo menos o nome/nick
+    const memberName = member.name || member.username;
+    if (!memberName) {
+      throw new Error('Nick do membro não encontrado');
+    }
+
+    // Abre o diálogo primeiro com dados básicos (enquanto carrega os completos)
+    this.openStaffDialog({
+      username: memberName,
+      name: memberName,
+      avatar: member.avatar || `https://cravatar.eu/helmavatar/${encodeURIComponent(memberName)}/190.png`,
+      role: member.role || 'Membro',
+      seguidores: member.seguidores || 0,
+      seguindo: member.seguindo || 0,
+      trofeus: member.trofeus || 0,
+      alertas: member.alertas || 0,
+      post_count: member.post_count || 0,
+      likes_received: member.likes_received || 0,
+      last_login: member.last_login || new Date().toISOString(),
+      data_criacao: member.data_criacao || null,
+      minecraft_nick: member.minecraft_nick || memberName
+    });
+
+    // Busca dados completos da API
+    const response = await fetch(`http://localhost:3001/api/members/${encodeURIComponent(memberName)}`);
+    
+    if (!response.ok) throw new Error('Erro na API');
+    
+    const fullData = await response.json();
+    console.log('Dados completos da API:', fullData);
+    
+    // Se a API retornou com sucesso e tem dados do membro
+    if (fullData.success && fullData.member) {
+      // Atualiza os dados no diálogo com as informações completas
+      this.selectedStaff = {
+        username: fullData.member.username || memberName,
+        name: fullData.member.name || memberName,
+        avatar: fullData.member.avatar || member.avatar || `https://cravatar.eu/helmavatar/${encodeURIComponent(memberName)}/190.png`,
+        role: fullData.member.role || member.role || 'Membro',
+        seguidores: fullData.member.seguidores || member.seguidores || 0,
+        seguindo: fullData.member.seguindo || member.seguindo || 0,
+        trofeus: fullData.member.trofeus || member.trofeus || 0,
+        alertas: fullData.member.alertas || member.alertas || 0,
+        post_count: fullData.member.post_count || member.post_count || 0,
+        likes_received: fullData.member.likes_received || member.likes_received || 0,
+        last_login: fullData.member.last_login || member.last_login || new Date().toISOString(),
+        data_criacao: fullData.member.data_criacao || member.data_criacao || null,
+        minecraft_nick: fullData.member.minecraft_nick || member.minecraft_nick || memberName
+      };
+    }
+  } catch (error) {
+    console.error('Erro ao carregar dados:', error);
+    // Mantém os dados básicos se houver erro
+  }
+},
+  
+  openStaffDialog(staffData) {
+    this.selectedStaff = staffData;
+    this.staffDialog = true;
+  },
+    
+    closeStaffDialog() {
+      this.staffDialog = false;
+      this.selectedStaff = null;
+      this.dialogOpenedByClick = false; // Reseta a flag ao fechar
+    },
+    
     getRoleColor(role) {
       const roleColors = {
         'Master': '#e67e22',     
         'Gerente': '#c0392b',    
-        'Admin': '#e74c3c',     
+        'Admin': 'rgb(255 116 101)',     
         'Moderador': '#27ae60',  
         'Ajudante': '#f1c40f'    
       };
       return roleColors[role] || '#95a5a6'; 
     },
+    
     async loadData() {
       this.loading = true;
       this.error = null;
@@ -191,11 +459,10 @@ export default {
         await Promise.all([
           this.loadTeamMembers(),
           this.loadRecentTopics(),
-          this.loadForumCategories(), // Isso agora vai carregar os categoryGroups
+          this.loadForumCategories(),
           this.loadStats()
         ]);
         
-        // Carrega tópicos para cada categoria
         await Promise.all([
           this.loadCategoryTopics(this.mainForums),
           this.loadCategoryTopics(this.teamForums)
@@ -208,6 +475,7 @@ export default {
         this.loading = false;
       }
     },
+    
     async loadTeamMembers() {
       try {
         const res = await fetch('http://localhost:3001/api/team');
@@ -225,61 +493,58 @@ export default {
         this.teamMembers = [];
       }
     },
+    
     formatDate(dateString) {
-      if (!dateString) return '';
+      if (!dateString) return 'Data inválida';
       
-      const now = new Date();
-      const date = new Date(dateString);
-      const diffInSeconds = Math.floor((now - date) / 1000);
-      
-      const formatTime = (d) => d.toLocaleTimeString('pt-BR', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
-      
-      const formatDayMonth = (d) => d.toLocaleDateString('pt-BR', {
-        day: 'numeric',
-        month: 'long'
-      });
-      
-      if (diffInSeconds < 60) {
-        return 'agora mesmo';
-      }
-      
-      const diffInMinutes = Math.floor(diffInSeconds / 60);
-      if (diffInMinutes < 60) {
-        return `há ${diffInMinutes} ${diffInMinutes === 1 ? 'minuto' : 'minutos'}`;
-      }
-      
-      const diffInHours = Math.floor(diffInMinutes / 60);
-      if (diffInHours < 24) {
-        return `há ${diffInHours} ${diffInHours === 1 ? 'hora' : 'horas'}`;
-      }
-      
-      const diffInDays = Math.floor(diffInHours / 24);
-      if (diffInDays === 1) {
-        return `ontem às ${formatTime(date)}`;
-      }
-      
-      if (diffInDays < 7) {
-        return `há ${diffInDays} dias`;
-      }
-      
-      return `${formatDayMonth(date)} às ${formatTime(date)}`;
-    },
-    async loadRecentTopics() {
       try {
-        const res = await fetch('http://localhost:3001/api/forum/recent-topics?limit=7');
-        if (!res.ok) throw new Error('Erro ao carregar tópicos recentes');
-        this.recentTopics = await res.json();
-      } catch (error) {
-        console.error('Erro ao carregar tópicos recentes:', error);
-        this.recentTopics = [];
+        const date = new Date(dateString);
+        
+        if (isNaN(date.getTime())) {
+          return 'Data inválida';
+        }
+
+        // Mapeamento dos nomes dos meses
+        const monthNames = [
+          'janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+          'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'
+        ];
+
+        const day = date.getDate();
+        const month = monthNames[date.getMonth()];
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        
+        return `${day} de ${month} às ${hours}:${minutes}`;
+      } catch (e) {
+        console.error('Erro ao formatar data:', e);
+        return 'Data inválida';
       }
     },
+    
+    async loadRecentTopics() {
+  try {
+    const res = await fetch('http://localhost:3001/api/forum/recent-topics?limit=7');
+    if (!res.ok) throw new Error('Erro ao carregar tópicos recentes');
+    let topics = await res.json();
+    
+    // Ordenar tópicos pela data da última resposta (do mais recente para o mais antigo)
+    this.recentTopics = topics.sort((a, b) => {
+      // Se não houver última resposta, usa a data de criação
+      const dateA = a.last_reply_date ? new Date(a.last_reply_date) : new Date(a.created_at);
+      const dateB = b.last_reply_date ? new Date(b.last_reply_date) : new Date(b.created_at);
+      
+      return dateB - dateA; // Ordem decrescente (mais recente primeiro)
+    });
+    
+  } catch (error) {
+    console.error('Erro ao carregar tópicos recentes:', error);
+    this.recentTopics = [];
+  }
+},
+    
     async loadForumCategories() {
       try {
-        // Carrega categorias do tipo "main" e "team" da API
         const [mainRes, teamRes] = await Promise.all([
           fetch('http://localhost:3001/api/forum/categories?type=main'),
           fetch('http://localhost:3001/api/forum/categories?type=team')
@@ -291,7 +556,6 @@ export default {
         this.mainForums = await mainRes.json();
         this.teamForums = await teamRes.json();
         
-        // Organiza as categorias em grupos para exibição
         this.categoryGroups = [
           {
             title: 'Geral',
@@ -315,6 +579,7 @@ export default {
         this.error = "Não foi possível carregar as categorias do fórum. O resto do conteúdo será exibido.";
       }
     },
+    
     async loadStats() {
       try {
         const res = await fetch('http://localhost:3001/api/forum/stats');
@@ -325,23 +590,22 @@ export default {
         this.stats = { posts: 0, members: 0, guests: 0 };
       }
     },
+    
     async loadCategoryTopics(forums) {
       try {
         const categoryTopics = await Promise.all(
           forums.map(forum => 
-            fetch(`http://localhost:3001/api/forum/topics/${encodeURIComponent(forum.name)}`)
+            fetch(`api/forum/topics/${encodeURIComponent(forum.name)}`)
               .then(res => res.ok ? res.json() : [])
               .catch(() => [])
           )
         );
         
-        // Atualiza os fóruns com a contagem de tópicos e postagens
         forums.forEach((forum, index) => {
           forum.threads = categoryTopics[index]?.length || 0;
           forum.posts = categoryTopics[index]?.reduce((sum, topic) => sum + (topic.replies || 0) + 1, 0) || 0;
         });
         
-        // Atualiza também as categorias nos grupos
         this.categoryGroups.forEach(group => {
           group.categories.forEach(cat => {
             const forum = forums.find(f => f.name === cat.name);
@@ -359,6 +623,11 @@ export default {
 }
 </script>
 <style scoped>
+.equipe-tipo:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+
+}
 .categoria-mensagens {
   align-items: right;
 }
@@ -378,6 +647,11 @@ export default {
     font-size: 15px;
     font-weight: normal;
   }
+  .equipe-title-dois {
+    color: orange;
+    font-size: 11px;
+    color: #23527c;
+  }
   .equipe-title {
     color: orange;
     font-size: 17px;
@@ -393,6 +667,7 @@ export default {
   .equipe-tipo {
     padding: 0em;
     text-align: left;
+    transition: all 0.2s ease;
     padding-top: 0px;
     margin-top: -8px;
   }
@@ -430,6 +705,35 @@ export default {
 .btn-block {
     display: block;
     width: 100%;
+}
+.orientacao-estatistica {
+  width: 100%;
+  padding: 0 0px;
+  display: flex;
+  line-height: 10px;
+}
+.orientacao-left-left {
+  flex-direction: column;
+  justify-content: right;
+  align-items: right;
+  text-align: right;
+  margin-left: auto;
+  float: right;
+    font-weight: 300;
+    color: rgb(103, 103, 103);
+    font-size: 16px;
+}
+
+.orientacao-left {
+    float: left;
+    font-weight: normal;
+    color: rgb(103, 103, 103);
+    font-size: 16px;
+}
+.user-info {
+ width: 100%;
+ margin-top: 10px;
+     
 }
 .nosso-ip-subtitle-recomendacao {
   font-size: 16px;
